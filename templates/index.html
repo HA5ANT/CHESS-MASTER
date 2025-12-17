@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chess Engine</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Chess Engine</h1>
+        </header>
+        
+        <main class="game-container">
+            <div class="eval-bar-container">
+                <div class="eval-bar">
+                    <div class="eval-bar-white" id="evalBarWhite"></div>
+                    <div class="eval-bar-black" id="evalBarBlack"></div>
+                </div>
+                <div class="eval-value" id="evalValue">0.0</div>
+            </div>
+            
+            <div class="board-section">
+                <div class="board-container">
+                    <div class="board" id="chessBoard"></div>
+                    <div class="thinking-overlay" id="thinkingOverlay">
+                        <div class="spinner"></div>
+                        <span>AI calculating...</span>
+                    </div>
+                </div>
+                
+                <div class="controls">
+                    <div class="control-group">
+                        <label for="depthSelect">AI Depth:</label>
+                        <select id="depthSelect">
+                            <option value="1">1 (Fast)</option>
+                            <option value="2">2</option>
+                            <option value="3" selected>3 (Normal)</option>
+                            <option value="4">4</option>
+                            <option value="5">5 (Strong)</option>
+                        </select>
+                    </div>
+                    
+                    <div class="control-group">
+                        <label for="colorSelect">Play as:</label>
+                        <select id="colorSelect">
+                            <option value="white">White</option>
+                            <option value="black">Black</option>
+                        </select>
+                    </div>
+                    
+                    <div class="button-group">
+                        <button id="newGameBtn" class="btn btn-primary">New Game</button>
+                        <button id="undoBtn" class="btn">Take Back</button>
+                        <button id="flipBtn" class="btn">Flip Board</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="info-panel">
+                <div class="status-bar">
+                    <span id="turnIndicator">White to move</span>
+                    <span id="gameStatus"></span>
+                </div>
+                
+                <div class="moves-container">
+                    <h3>Move History</h3>
+                    <div class="moves-table" id="movesTable"></div>
+                </div>
+                
+                <div class="game-result" id="gameResult"></div>
+            </div>
+        </main>
+    </div>
+    
+    <script src="/static/js/chess.js"></script>
+</body>
+</html>
