@@ -108,6 +108,8 @@ ENGLISH_OPENING = {
     "e7e6": ["b1c3", "g2g3", "g1f3"],
 }
 
+ENGLISH_THEMATIC_MOVES = ["b1c3", "g2g3", "f1g2", "g1f3", "e1g1", "d2d3", "e2e4", "b2b3"]
+
 MODERN_DEFENSE = {
     "e2e4": ["g7g6"],
     "e2e4 g7g6": ["d7d6", "f8g7"],
@@ -124,6 +126,8 @@ MODERN_DEFENSE = {
     "g1f3": ["g7g6"],
     "c2c4": ["g7g6"],
 }
+
+MODERN_THEMATIC_MOVES = ["g7g6", "f8g7", "d7d6", "b8d7", "e7e5", "c7c6", "a7a6", "b7b5"]
 
 
 class ChessEngine:
@@ -333,15 +337,39 @@ class ChessEngine:
     
     def get_opening_move(self) -> Optional[str]:
         move_sequence = " ".join(self.get_move_history_uci())
+        move_count = len(self.move_history)
         
         if self.ai_color == chess.WHITE:
             if move_sequence in ENGLISH_OPENING:
                 moves = ENGLISH_OPENING[move_sequence]
                 return random.choice(moves)
+            elif move_count < 12:
+                return self._get_thematic_move(ENGLISH_THEMATIC_MOVES)
         elif self.ai_color == chess.BLACK:
             if move_sequence in MODERN_DEFENSE:
                 moves = MODERN_DEFENSE[move_sequence]
                 return random.choice(moves)
+            elif move_count < 12:
+                return self._get_thematic_move(MODERN_THEMATIC_MOVES)
+        
+        return None
+    
+    def _get_thematic_move(self, thematic_moves: List[str]) -> Optional[str]:
+        legal_moves = list(self.board.legal_moves)
+        thematic_legal = []
+        
+        for move in legal_moves:
+            if move.uci() in thematic_moves:
+                self.board.push(move)
+                eval_score = self.evaluate()
+                self.board.pop()
+                
+                perspective = 1 if self.ai_color == chess.WHITE else -1
+                if eval_score * perspective >= self.safety_threshold:
+                    thematic_legal.append(move.uci())
+        
+        if thematic_legal and random.random() < 0.7:
+            return random.choice(thematic_legal)
         
         return None
     
@@ -375,7 +403,7 @@ class ChessEngine:
         scored_moves.sort(key=lambda x: x[0], reverse=True)
         return [move for _, move in scored_moves]
     
-    def quiescence(self, alpha: int, beta: int, depth: int = 0) -> int:
+    def quiescence(self, alpha: float, beta: float, depth: int = 0) -> float:
         self.nodes_searched += 1
         
         stand_pat = self.evaluate()

@@ -15,7 +15,12 @@ let gameState = {
     aiDepth: 3,
     isThinking: false,
     lastMove: null,
-    moveHistory: []
+    moveHistory: [],
+    draggedPiece: null,
+    draggedFrom: null,
+    dragGhost: null,
+    isDragging: false,
+    moveInProgress: false
 };
 
 function init() {
@@ -30,6 +35,11 @@ function init() {
         gameState.isFlipped = e.target.value === 'black';
     });
     
+    document.addEventListener('mousemove', handleDragMove);
+    document.addEventListener('mouseup', handleDragEnd);
+    document.addEventListener('touchmove', handleTouchMove, { passive: false });
+    document.addEventListener('touchend', handleTouchEnd);
+    
     newGame();
 }
 
@@ -40,6 +50,7 @@ async function newGame() {
     gameState.selectedSquare = null;
     gameState.legalMoves = [];
     gameState.lastMove = null;
+    cleanupDrag();
     
     try {
         const response = await fetch('/api/new-game', {
@@ -121,6 +132,15 @@ function renderBoard() {
                 pieceEl.className = 'piece';
                 pieceEl.classList.add(piece === piece.toUpperCase() ? 'white' : 'black');
                 pieceEl.textContent = PIECES[piece];
+                pieceEl.dataset.square = square;
+                pieceEl.dataset.piece = piece;
+                
+                if (isPieceOwnedByPlayer(piece)) {
+                    pieceEl.draggable = true;
+                    pieceEl.addEventListener('mousedown', (e) => handleDragStart(e, square, piece));
+                    pieceEl.addEventListener('touchstart', (e) => handleTouchStart(e, square, piece), { passive: false });
+                }
+                
                 squareEl.appendChild(pieceEl);
                 
                 if (piece.toLowerCase() === 'k') {
@@ -138,9 +158,180 @@ function renderBoard() {
             }
             
             squareEl.addEventListener('click', () => handleSquareClick(square));
+            squareEl.addEventListener('dragover', (e) => e.preventDefault());
+            squareEl.addEventListener('drop', (e) => handleDrop(e, square));
+            
             board.appendChild(squareEl);
         }
     }
+}
+
+async function handleDragStart(e, square, piece) {
+    if (gameState.isThinking || !isPlayerTurn() || gameState.moveInProgress) return;
+    
+    e.preventDefault();
+    
+    gameState.isDragging = true;
+    gameState.draggedFrom = square;
+    gameState.draggedPiece = piece;
+    
+    const ghost = document.createElement('div');
+    ghost.className = 'drag-ghost';
+    ghost.innerHTML = `<span class="piece ${piece === piece.toUpperCase() ? 'white' : 'black'}">${PIECES[piece]}</span>`;
+    document.body.appendChild(ghost);
+    gameState.dragGhost = ghost;
+    
+    ghost.style.left = `${e.clientX - 30}px`;
+    ghost.style.top = `${e.clientY - 30}px`;
+    
+    await selectSquare(square);
+}
+
+async function handleTouchStart(e, square, piece) {
+    if (gameState.isThinking || !isPlayerTurn() || gameState.moveInProgress) return;
+    
+    e.preventDefault();
+    
+    const touch = e.touches[0];
+    
+    gameState.isDragging = true;
+    gameState.draggedFrom = square;
+    gameState.draggedPiece = piece;
+    
+    const ghost = document.createElement('div');
+    ghost.className = 'drag-ghost';
+    ghost.innerHTML = `<span class="piece ${piece === piece.toUpperCase() ? 'white' : 'black'}">${PIECES[piece]}</span>`;
+    document.body.appendChild(ghost);
+    gameState.dragGhost = ghost;
+    
+    ghost.style.left = `${touch.clientX - 30}px`;
+    ghost.style.top = `${touch.clientY - 30}px`;
+    
+    await selectSquare(square);
+}
+
+function handleDragMove(e) {
+    if (!gameState.dragGhost) return;
+    
+    gameState.dragGhost.style.left = `${e.clientX - 30}px`;
+    gameState.dragGhost.style.top = `${e.clientY - 30}px`;
+}
+
+function handleTouchMove(e) {
+    if (!gameState.dragGhost) return;
+    
+    e.preventDefault();
+    const touch = e.touches[0];
+    
+    gameState.dragGhost.style.left = `${touch.clientX - 30}px`;
+    gameState.dragGhost.style.top = `${touch.clientY - 30}px`;
+}
+
+async function handleDragEnd(e) {
+    if (!gameState.draggedFrom || gameState.moveInProgress) {
+        cleanupDrag();
+        return;
+    }
+    
+    const targetSquare = getSquareFromPoint(e.clientX, e.clientY);
+    const fromSquare = gameState.draggedFrom;
+    
+    cleanupDrag();
+    
+    if (targetSquare && gameState.legalMoves.includes(targetSquare)) {
+        gameState.moveInProgress = true;
+        try {
+            await makeMove(fromSquare, targetSquare);
+        } finally {
+            gameState.moveInProgress = false;
+        }
+    } else {
+        renderBoard();
+    }
+}
+
+async function handleTouchEnd(e) {
+    if (!gameState.draggedFrom || gameState.moveInProgress) {
+        cleanupDrag();
+        return;
+    }
+    
+    const touch = e.changedTouches[0];
+    const targetSquare = getSquareFromPoint(touch.clientX, touch.clientY);
+    const fromSquare = gameState.draggedFrom;
+    
+    cleanupDrag();
+    
+    if (targetSquare && gameState.legalMoves.includes(targetSquare)) {
+        gameState.moveInProgress = true;
+        try {
+            await makeMove(fromSquare, targetSquare);
+        } finally {
+            gameState.moveInProgress = false;
+        }
+    } else {
+        renderBoard();
+    }
+}
+
+async function handleDrop(e, targetSquare) {
+    e.preventDefault();
+    
+    if (!gameState.draggedFrom || gameState.moveInProgress) {
+        cleanupDrag();
+        return;
+    }
+    
+    const fromSquare = gameState.draggedFrom;
+    cleanupDrag();
+    
+    if (gameState.legalMoves.includes(targetSquare)) {
+        gameState.moveInProgress = true;
+        try {
+            await makeMove(fromSquare, targetSquare);
+        } finally {
+            gameState.moveInProgress = false;
+        }
+    }
+}
+
+function getSquareFromPoint(x, y) {
+    const board = document.getElementById('chessBoard');
+    const rect = board.getBoundingClientRect();
+    
+    if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
+        return null;
+    }
+    
+    const squareSize = rect.width / 8;
+    const fileIndex = Math.floor((x - rect.left) / squareSize);
+    const rankIndex = Math.floor((y - rect.top) / squareSize);
+    
+    if (fileIndex < 0 || fileIndex > 7 || rankIndex < 0 || rankIndex > 7) {
+        return null;
+    }
+    
+    const files = gameState.isFlipped ? [...FILES].reverse() : FILES;
+    const ranks = gameState.isFlipped ? [...RANKS].reverse() : RANKS;
+    
+    return files[fileIndex] + ranks[rankIndex];
+}
+
+function cleanupDrag() {
+    if (gameState.dragGhost) {
+        gameState.dragGhost.remove();
+        gameState.dragGhost = null;
+    }
+    gameState.draggedFrom = null;
+    gameState.draggedPiece = null;
+    gameState.isDragging = false;
+}
+
+function isPlayerTurn() {
+    const fenParts = gameState.fen.split(' ');
+    const turn = fenParts[1];
+    return (turn === 'w' && gameState.playerColor === 'white') ||
+           (turn === 'b' && gameState.playerColor === 'black');
 }
 
 function parseFEN(fen) {
@@ -170,15 +361,12 @@ function isInCheck() {
 
 async function handleSquareClick(square) {
     if (gameState.isThinking) return;
+    if (gameState.draggedFrom) return;
     
     const position = parseFEN(gameState.fen);
     const piece = position[square];
-    const fenParts = gameState.fen.split(' ');
-    const turn = fenParts[1];
-    const isPlayerTurn = (turn === 'w' && gameState.playerColor === 'white') ||
-                         (turn === 'b' && gameState.playerColor === 'black');
     
-    if (!isPlayerTurn) return;
+    if (!isPlayerTurn()) return;
     
     if (gameState.selectedSquare) {
         if (gameState.legalMoves.includes(square)) {
