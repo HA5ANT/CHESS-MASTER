@@ -5,7 +5,7 @@ Main application server with session-based game state management.
 
 import os
 import uuid
-from flask import Flask, render_template, jsonify, request, session
+from flask import Flask, render_template, jsonify, request, session, send_from_directory
 from chess_engine import ChessEngine
 import chess
 
@@ -29,6 +29,12 @@ def get_engine() -> ChessEngine:
 @app.route('/')
 def index():
     return render_template('index.html')
+
+
+@app.route('/pieces/<path:filename>')
+def serve_piece(filename: str):
+    pieces_dir = os.path.join(app.root_path, 'ChessPieces')
+    return send_from_directory(pieces_dir, filename)
 
 
 @app.route('/api/new-game', methods=['POST'])
@@ -81,6 +87,28 @@ def get_ai_move(depth: int):
         engine.make_move(best_move)
         state = engine.get_state()
         state['ai_move'] = best_move
+        return jsonify(state)
+    else:
+        return jsonify({"error": "No valid move found"}), 400
+
+
+@app.route('/api/suggest-move/<int:depth>')
+def suggest_move(depth: int):
+    engine = get_engine()
+    
+    depth = max(1, min(5, depth))
+    
+    original_ai_color = engine.ai_color
+    try:
+        # Treat the side to move as the "AI" for evaluation safety
+        engine.ai_color = engine.board.turn
+        best_move = engine.get_best_move(depth)
+    finally:
+        engine.ai_color = original_ai_color
+    
+    if best_move:
+        state = engine.get_state()
+        state['suggested_move'] = best_move
         return jsonify(state)
     else:
         return jsonify({"error": "No valid move found"}), 400

@@ -1,7 +1,9 @@
-const PIECES = {
-    'P': '♙', 'N': '♘', 'B': '♗', 'R': '♖', 'Q': '♕', 'K': '♔',
-    'p': '♟', 'n': '♞', 'b': '♝', 'r': '♜', 'q': '♛', 'k': '♚'
-};
+function getPieceImageUrl(piece) {
+    const isWhite = piece === piece.toUpperCase();
+    const colorPrefix = isWhite ? 'w' : 'b';
+    const pieceLetter = piece.toUpperCase();
+    return `/pieces/${colorPrefix}${pieceLetter}.png`;
+}
 
 const FILES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
 const RANKS = ['8', '7', '6', '5', '4', '3', '2', '1'];
@@ -20,12 +22,261 @@ let gameState = {
     draggedFrom: null,
     dragGhost: null,
     isDragging: false,
-    moveInProgress: false
+    moveInProgress: false,
+    inCheck: false
 };
+
+let highlightCanvas = null;
+let highlightCtx = null;
+let squarePositions = {};
+let arrows = [];
+let redSquares = new Set();
+let rightMouseDrag = null;
+
+const DEFAULT_ARROW_COLOR = 'rgba(255, 170, 0, 0.85)';
+const SUGGESTION_ARROW_COLOR = 'rgba(0, 180, 0, 0.75)';
+const RED_SQUARE_COLOR = 'rgba(220, 38, 38, 0.6)';
+
+function setupBoardHighlights() {
+    const boardContainer = document.querySelector('.board-container');
+    const board = document.getElementById('chessBoard');
+    if (!boardContainer || !board) return;
+    
+    if (!highlightCanvas) {
+        const canvas = document.createElement('canvas');
+        canvas.id = 'boardHighlightsCanvas';
+        canvas.style.position = 'absolute';
+        canvas.style.top = '0';
+        canvas.style.left = '0';
+        canvas.style.zIndex = '5';
+        canvas.style.pointerEvents = 'none';
+        boardContainer.appendChild(canvas);
+        
+        highlightCanvas = canvas;
+        highlightCtx = canvas.getContext('2d');
+    }
+    
+    resizeHighlights();
+}
+
+function updateSquarePositions() {
+    const board = document.getElementById('chessBoard');
+    if (!board || !highlightCanvas) return;
+    
+    const boardRect = board.getBoundingClientRect();
+    squarePositions = {};
+    
+    const squares = board.querySelectorAll('.square');
+    squares.forEach((sq) => {
+        const name = sq.dataset.square;
+        if (!name) return;
+        
+        const r = sq.getBoundingClientRect();
+        squarePositions[name] = {
+            x: r.left - boardRect.left,
+            y: r.top - boardRect.top,
+            width: r.width,
+            height: r.height,
+            cx: r.left - boardRect.left + r.width / 2,
+            cy: r.top - boardRect.top + r.height / 2
+        };
+    });
+}
+
+function resizeHighlights() {
+    const board = document.getElementById('chessBoard');
+    if (!board || !highlightCanvas) return;
+    
+    const rect = board.getBoundingClientRect();
+    highlightCanvas.width = rect.width;
+    highlightCanvas.height = rect.height;
+    
+    updateSquarePositions();
+    drawHighlights();
+}
+
+function drawHighlights() {
+    if (!highlightCtx || !highlightCanvas) return;
+    
+    highlightCtx.clearRect(0, 0, highlightCanvas.width, highlightCanvas.height);
+    
+    // Red squares
+    redSquares.forEach((square) => {
+        const pos = squarePositions[square];
+        if (!pos) return;
+        
+        highlightCtx.fillStyle = RED_SQUARE_COLOR;
+        highlightCtx.fillRect(pos.x, pos.y, pos.width, pos.height);
+    });
+    
+    // Arrows
+    arrows.forEach(({ from, to, color }) => {
+        const fromPos = squarePositions[from];
+        const toPos = squarePositions[to];
+        if (!fromPos || !toPos) return;
+        
+        drawArrow(fromPos.cx, fromPos.cy, toPos.cx, toPos.cy, color);
+    });
+}
+
+function drawArrow(fromX, fromY, toX, toY, color) {
+    if (!highlightCtx) return;
+    
+    const ctx = highlightCtx;
+    const dx = toX - fromX;
+    const dy = toY - fromY;
+    const length = Math.sqrt(dx * dx + dy * dy);
+    if (length === 0) return;
+    
+    const angle = Math.atan2(dy, dx);
+    const headLength = 17;
+    const shaftWidth = 10;
+    const arrowColor = color || DEFAULT_ARROW_COLOR;
+    
+    const tipX = toX;
+    const tipY = toY;
+    const baseX = tipX - Math.cos(angle) * headLength;
+    const baseY = tipY - Math.sin(angle) * headLength;
+    
+    ctx.strokeStyle = arrowColor;
+    ctx.fillStyle = arrowColor;
+    ctx.lineWidth = shaftWidth;
+    ctx.lineCap = 'straight';
+    
+    ctx.beginPath();
+    ctx.moveTo(fromX, fromY);
+    ctx.lineTo(baseX, baseY);
+    ctx.stroke();
+    
+    ctx.beginPath();
+    ctx.moveTo(tipX, tipY);
+    ctx.lineTo(
+        baseX - headLength * Math.cos(angle - Math.PI / 5),
+        baseY - headLength * Math.sin(angle - Math.PI / 5)
+    );
+    ctx.lineTo(
+        baseX - headLength * Math.cos(angle + Math.PI / 5),
+        baseY - headLength * Math.sin(angle + Math.PI / 5)
+    );
+    ctx.closePath();
+    ctx.fill();
+}
+
+// Public API
+function addArrow(from, to) {
+    if (!from || !to || from === to) return;
+    if (!arrows.some((a) => a.from === from && a.to === to)) {
+        arrows.push({ from, to, color: DEFAULT_ARROW_COLOR });
+        drawHighlights();
+    }
+}
+
+function removeArrow(from, to) {
+    const before = arrows.length;
+    arrows = arrows.filter((a) => !(a.from === from && a.to === to));
+    if (arrows.length !== before) {
+        drawHighlights();
+    }
+}
+
+function clearArrows() {
+    if (!arrows.length) return;
+    arrows = [];
+    drawHighlights();
+}
+
+function toggleRedSquare(square) {
+    if (!square) return;
+    
+    if (redSquares.has(square)) {
+        redSquares.delete(square);
+    } else {
+        redSquares.add(square);
+    }
+    
+    drawHighlights();
+}
+
+function clearRedSquares() {
+    if (!redSquares.size) return;
+    redSquares.clear();
+    drawHighlights();
+}
+
+function clearSuggestionArrows() {
+    if (!arrows.length) return;
+    arrows = arrows.filter((a) => !a.isSuggestion);
+    drawHighlights();
+}
+
+function addSuggestionArrow(from, to) {
+    if (!from || !to || from === to) return;
+    
+    // Remove any existing suggestion arrows and arrows on the same segment
+    arrows = arrows.filter((a) => !a.isSuggestion && !(a.from === from && a.to === to));
+    arrows.push({ from, to, color: SUGGESTION_ARROW_COLOR, isSuggestion: true });
+    drawHighlights();
+}
+
+function handleRightMouseDown(e) {
+    if (e.button !== 2) return;
+    
+    rightMouseDrag = {
+        startSquare: getSquareFromPoint(e.clientX, e.clientY),
+        startX: e.clientX,
+        startY: e.clientY,
+        moved: false
+    };
+    
+    e.preventDefault();
+}
+
+function handleRightMouseMove(e) {
+    if (!rightMouseDrag) return;
+    
+    if ((e.buttons & 2) === 0) {
+        rightMouseDrag = null;
+        return;
+    }
+    
+    const dx = e.clientX - rightMouseDrag.startX;
+    const dy = e.clientY - rightMouseDrag.startY;
+    if (!rightMouseDrag.moved && Math.hypot(dx, dy) > 4) {
+        rightMouseDrag.moved = true;
+    }
+}
+
+function handleRightMouseUp(e) {
+    if (e.button !== 2 || !rightMouseDrag) return;
+    
+    const endSquare = getSquareFromPoint(e.clientX, e.clientY);
+    
+    if (rightMouseDrag.moved && rightMouseDrag.startSquare && endSquare && endSquare !== rightMouseDrag.startSquare) {
+        const exists = arrows.some(
+            (a) => a.from === rightMouseDrag.startSquare && a.to === endSquare
+        );
+        if (exists) {
+            removeArrow(rightMouseDrag.startSquare, endSquare);
+        } else {
+            addArrow(rightMouseDrag.startSquare, endSquare);
+        }
+    } else {
+        if (endSquare) {
+            toggleRedSquare(endSquare);
+        } else {
+            clearArrows();
+            clearRedSquares();
+        }
+    }
+    
+    rightMouseDrag = null;
+    e.preventDefault();
+}
 
 function init() {
     document.getElementById('newGameBtn').addEventListener('click', newGame);
     document.getElementById('undoBtn').addEventListener('click', undoMove);
+    document.getElementById('suggestBtn').addEventListener('click', suggestMove);
     document.getElementById('flipBtn').addEventListener('click', flipBoard);
     document.getElementById('depthSelect').addEventListener('change', (e) => {
         gameState.aiDepth = parseInt(e.target.value);
@@ -39,6 +290,18 @@ function init() {
     document.addEventListener('mouseup', handleDragEnd);
     document.addEventListener('touchmove', handleTouchMove, { passive: false });
     document.addEventListener('touchend', handleTouchEnd);
+    
+    document.addEventListener('mousedown', handleRightMouseDown);
+    document.addEventListener('mousemove', handleRightMouseMove);
+    document.addEventListener('mouseup', handleRightMouseUp);
+    window.addEventListener('resize', resizeHighlights);
+    
+    const boardContainer = document.querySelector('.board-container');
+    if (boardContainer) {
+        boardContainer.addEventListener('contextmenu', (e) => e.preventDefault());
+    }
+    
+    setupBoardHighlights();
     
     newGame();
 }
@@ -73,6 +336,9 @@ async function newGame() {
 function updateGameState(state) {
     gameState.fen = state.fen;
     gameState.moveHistory = state.move_history || [];
+    gameState.inCheck = !!state.in_check;
+    
+    clearSuggestionArrows();
     
     if (state.move_history && state.move_history.length > 0) {
         gameState.lastMove = state.move_history[state.move_history.length - 1];
@@ -128,10 +394,11 @@ function renderBoard() {
             
             const piece = position[square];
             if (piece) {
-                const pieceEl = document.createElement('span');
+                const pieceEl = document.createElement('img');
                 pieceEl.className = 'piece';
                 pieceEl.classList.add(piece === piece.toUpperCase() ? 'white' : 'black');
-                pieceEl.textContent = PIECES[piece];
+                pieceEl.src = getPieceImageUrl(piece);
+                pieceEl.alt = piece;
                 pieceEl.dataset.square = square;
                 pieceEl.dataset.piece = piece;
                 
@@ -164,9 +431,12 @@ function renderBoard() {
             board.appendChild(squareEl);
         }
     }
+    
+    resizeHighlights();
 }
 
 async function handleDragStart(e, square, piece) {
+    if (e.button !== 0) return;
     if (gameState.isThinking || !isPlayerTurn() || gameState.moveInProgress) return;
     
     e.preventDefault();
@@ -177,12 +447,16 @@ async function handleDragStart(e, square, piece) {
     
     const ghost = document.createElement('div');
     ghost.className = 'drag-ghost';
-    ghost.innerHTML = `<span class="piece ${piece === piece.toUpperCase() ? 'white' : 'black'}">${PIECES[piece]}</span>`;
+    const ghostImg = document.createElement('img');
+    ghostImg.className = `piece ${piece === piece.toUpperCase() ? 'white' : 'black'}`;
+    ghostImg.src = getPieceImageUrl(piece);
+    ghostImg.alt = piece;
+    ghost.appendChild(ghostImg);
     document.body.appendChild(ghost);
     gameState.dragGhost = ghost;
     
-    ghost.style.left = `${e.clientX - 30}px`;
-    ghost.style.top = `${e.clientY - 30}px`;
+    ghost.style.left = `${e.clientX}px`;
+    ghost.style.top = `${e.clientY}px`;
     
     await selectSquare(square);
 }
@@ -200,12 +474,16 @@ async function handleTouchStart(e, square, piece) {
     
     const ghost = document.createElement('div');
     ghost.className = 'drag-ghost';
-    ghost.innerHTML = `<span class="piece ${piece === piece.toUpperCase() ? 'white' : 'black'}">${PIECES[piece]}</span>`;
+    const ghostImg = document.createElement('img');
+    ghostImg.className = `piece ${piece === piece.toUpperCase() ? 'white' : 'black'}`;
+    ghostImg.src = getPieceImageUrl(piece);
+    ghostImg.alt = piece;
+    ghost.appendChild(ghostImg);
     document.body.appendChild(ghost);
     gameState.dragGhost = ghost;
     
-    ghost.style.left = `${touch.clientX - 30}px`;
-    ghost.style.top = `${touch.clientY - 30}px`;
+    ghost.style.left = `${touch.clientX}px`;
+    ghost.style.top = `${touch.clientY}px`;
     
     await selectSquare(square);
 }
@@ -213,8 +491,8 @@ async function handleTouchStart(e, square, piece) {
 function handleDragMove(e) {
     if (!gameState.dragGhost) return;
     
-    gameState.dragGhost.style.left = `${e.clientX - 30}px`;
-    gameState.dragGhost.style.top = `${e.clientY - 30}px`;
+    gameState.dragGhost.style.left = `${e.clientX}px`;
+    gameState.dragGhost.style.top = `${e.clientY}px`;
 }
 
 function handleTouchMove(e) {
@@ -223,8 +501,8 @@ function handleTouchMove(e) {
     e.preventDefault();
     const touch = e.touches[0];
     
-    gameState.dragGhost.style.left = `${touch.clientX - 30}px`;
-    gameState.dragGhost.style.top = `${touch.clientY - 30}px`;
+    gameState.dragGhost.style.left = `${touch.clientX}px`;
+    gameState.dragGhost.style.top = `${touch.clientY}px`;
 }
 
 async function handleDragEnd(e) {
@@ -356,7 +634,7 @@ function parseFEN(fen) {
 }
 
 function isInCheck() {
-    return gameState.fen.includes('+');
+    return gameState.inCheck;
 }
 
 async function handleSquareClick(square) {
@@ -444,6 +722,64 @@ async function makeMove(from, to) {
     }
 }
 
+async function animateMove(moveUci, state) {
+    const from = moveUci.substring(0, 2);
+    const to = moveUci.substring(2, 4);
+    
+    const board = document.getElementById('chessBoard');
+    if (!board) {
+        updateGameState(state);
+        return;
+    }
+    
+    const fromSquareEl = board.querySelector(`.square[data-square="${from}"]`);
+    const toSquareEl = board.querySelector(`.square[data-square="${to}"]`);
+    
+    if (!fromSquareEl || !toSquareEl) {
+        updateGameState(state);
+        return;
+    }
+    
+    const pieceImg = fromSquareEl.querySelector('.piece');
+    if (!pieceImg) {
+        updateGameState(state);
+        return;
+    }
+    
+    const destPieceImg = toSquareEl.querySelector('.piece');
+    
+    const fromRect = pieceImg.getBoundingClientRect();
+    const toRect = toSquareEl.getBoundingClientRect();
+    
+    const ghost = pieceImg.cloneNode(true);
+    ghost.classList.add('ai-move-ghost');
+    ghost.style.position = 'fixed';
+    ghost.style.pointerEvents = 'none';
+    ghost.style.zIndex = '1100';
+    ghost.style.left = `${fromRect.left + fromRect.width / 2}px`;
+    ghost.style.top = `${fromRect.top + fromRect.height / 2}px`;
+    ghost.style.width = `${fromRect.width}px`;
+    ghost.style.height = `${fromRect.height}px`;
+    ghost.style.transform = 'translate(-50%, -50%)';
+    document.body.appendChild(ghost);
+    
+    pieceImg.style.opacity = '0';
+    if (destPieceImg) {
+        destPieceImg.style.opacity = '0';
+    }
+    
+    requestAnimationFrame(() => {
+        ghost.style.transition = 'left 0.4s ease-out, top 0.4s ease-out';
+        ghost.style.left = `${toRect.left + toRect.width / 2}px`;
+        ghost.style.top = `${toRect.top + toRect.height / 2}px`;
+    });
+    
+    await new Promise((resolve) => setTimeout(resolve, 420));
+    
+    ghost.remove();
+    updateGameState(state);
+}
+
 async function makeAIMove() {
     setThinking(true);
     
@@ -452,10 +788,43 @@ async function makeAIMove() {
         const state = await response.json();
         
         if (!state.error) {
-            updateGameState(state);
+            if (state.ai_move) {
+                await animateMove(state.ai_move, state);
+            } else {
+                updateGameState(state);
+            }
         }
     } catch (error) {
         console.error('Error getting AI move:', error);
+    } finally {
+        setThinking(false);
+    }
+}
+
+async function suggestMove() {
+    if (gameState.isThinking || gameState.moveInProgress) return;
+    if (!isPlayerTurn()) return;
+    
+    setThinking(true);
+    
+    try {
+        const response = await fetch(`/api/suggest-move/${gameState.aiDepth}`);
+        const state = await response.json();
+        
+        if (state.error || !state.suggested_move) {
+            console.error('Suggest move error:', state.error || 'No suggested_move returned');
+            return;
+        }
+        
+        updateGameState(state);
+        
+        const move = state.suggested_move;
+        const from = move.substring(0, 2);
+        const to = move.substring(2, 4);
+        
+        addSuggestionArrow(from, to);
+    } catch (error) {
+        console.error('Error suggesting move:', error);
     } finally {
         setThinking(false);
     }
