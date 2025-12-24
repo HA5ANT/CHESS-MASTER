@@ -275,7 +275,6 @@ function handleRightMouseUp(e) {
 
 function init() {
     document.getElementById('newGameBtn').addEventListener('click', newGame);
-    document.getElementById('undoBtn').addEventListener('click', undoMove);
     document.getElementById('suggestBtn').addEventListener('click', suggestMove);
     document.getElementById('flipBtn').addEventListener('click', flipBoard);
     document.getElementById('depthSelect').addEventListener('change', (e) => {
@@ -957,8 +956,7 @@ function updateStatus(state) {
 }
 
 function updateButtons(state) {
-    const undoBtn = document.getElementById('undoBtn');
-    undoBtn.disabled = !state.can_undo || state.is_game_over;
+    // Button state updates removed
 }
 
 document.addEventListener('DOMContentLoaded', init);
